@@ -1,0 +1,27 @@
+# Tareas de Documentación - Master Documentación Controlada
+
+- [ ] Exploración Inicial del Proyecto <!-- id: 0 -->
+    - [x] Identificar stack tecnológico (composer.json, package.json) <!-- id: 1 -->
+    - [/] Mapear estructura de base de datos (migraciones/modelos) <!-- id: 2 -->
+    - [x] Analizar rutas y flujos principales <!-- id: 3 -->
+- [ ] Análisis de Lógica de Negocio <!-- id: 4 -->
+    - [x] Identificar roles y permisos <!-- id: 5 -->
+    - [x] Entender flujo de control de documentos <!-- id: 6 -->
+- [x] Generación de Documentación <!-- id: 7 -->
+    - [x] Crear Documentación Técnica (Arquitectura, BD, Stack) <!-- id: 8 -->
+    - [x] Crear Documentación Funcional (Reglas de negocio, Manual de usuario simplificado) <!-- id: 9 -->
+- [x] Regularización de Migraciones <!-- id: 10 -->
+    - [x] Verificar disponibilidad de `migrate:generate` <!-- id: 11 -->
+    - [x] Ejecutar generación de migraciones <!-- id: 12 -->
+    - [x] Validar archivos generados <!-- id: 13 -->
+- [x] Implementación Multi-Contratista (Trabajadores) <!-- id: 14 -->
+    - [x] Crear y ejecutar migración de índices <!-- id: 15 -->
+    - [x] Actualizar validación en GestionTrabajadoresContratista <!-- id: 16 -->
+    - [x] Actualizar validación en TrabajadoresImport <!-- id: 17 -->
+- [x] Mejoras de UI - Gestión Trabajadores (2025-11-28) <!-- id: 18 -->
+    - [x] Reemplazar texto 'A' por ícono de check verde en tabla de trabajadores <!-- id: 19 -->
+- [x] Mejoras de UI - Gestión Empresa (2025-11-28) <!-- id: 20 -->
+    - [x] Remover círculos de fondo en estados de documentos <!-- id: 21 -->
+    - [x] Reemplazar texto 'A' por ícono de check verde en tabla de empresa <!-- id: 22 -->
+- [x] Mejoras de UI - Gestión Contratistas (2025-11-28) <!-- id: 23 -->
+    - [x] Cambiar título "Gestión de Empresas Contratistas" por "Listado de Contratistas" <!-- id: 24 -->

@@ -1,0 +1,121 @@
+<?php
+
+namespace App\Exports\Sheets;
+
+use App\Models\Mandante;
+use App\Models\Contratista;
+use App\Models\UnidadOrganizacionalMandante;
+use App\Models\ReglaDocumental;
+use Maatwebsite\Excel\Concerns\FromCollection;
+use Maatwebsite\Excel\Concerns\WithTitle;
+use Maatwebsite\Excel\Concerns\WithHeadings;
+use Maatwebsite\Excel\Concerns\WithEvents;
+use Maatwebsite\Excel\Events\AfterSheet;
+use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
+
+class SincronizacionListadosSheet implements FromCollection, WithTitle, WithHeadings, WithEvents
+{
+    protected $mandanteId;
+
+    public function __construct($mandanteId = null)
+    {
+        $this->mandanteId = $mandanteId;
+    }
+
+    public function collection()
+    {
+        // Mandantes
+        $mandantesQuery = Mandante::where('is_active', true)->orderBy('razon_social');
+        if ($this->mandanteId) {
+            $mandantesQuery->where('id', $this->mandanteId);
+        }
+        $mandantes = $mandantesQuery->pluck('razon_social')->toArray();
+
+        // Contratistas
+        $cuos = [];
+        $contratistasQuery = Contratista::where('is_active', true)->orderBy('razon_social');
+        if ($this->mandanteId) {
+            $cuosList = \App\Models\ContratistaUnidadOrganizacional::select(
+                    'contratista_unidad_organizacional.contratista_id',
+                    'contratista_unidad_organizacional.id_registro'
+                )
+                ->join('unidades_organizacionales_mandante as uo', 'uo.id', '=', 'contratista_unidad_organizacional.unidad_organizacional_mandante_id')
+                ->where('uo.mandante_id', $this->mandanteId)
+                ->get();
+            $cuos = $cuosList->keyBy('contratista_id');
+            $contratistasQuery->whereIn('id', $cuosList->pluck('contratista_id'));
+        }
+        $contratistas = $contratistasQuery->get()->map(function ($c) use ($cuos) {
+            $idRegistro = $cuos[$c->id]->id_registro ?? null;
+            return $idRegistro ? "{$idRegistro}" : "{$c->razon_social} (Sin ID_REGISTRO)";
+        })->toArray();
+
+        // UOs
+        $uosQuery = UnidadOrganizacionalMandante::with('mandante')->where('is_active', true);
+        if ($this->mandanteId) {
+            $uosQuery->where('mandante_id', $this->mandanteId);
+        }
+        $uos = $uosQuery->get()->map(function ($uo) {
+            return ($uo->mandante->razon_social ?? 'SIN MANDANTE') . ' — ' . $uo->nombre_jerarquico;
+        })->sort()->values()->toArray();
+
+        // Tipos de entidad
+        $tiposEntidad = [
+            'App\Models\Trabajador',
+            'App\Models\Vehiculo',
+            'App\Models\Maquinaria',
+            'App\Models\Embarcacion',
+            'App\Models\Contratista',
+        ];
+
+        // Reglas documentales
+        $reglasQuery = ReglaDocumental::with(['mandante', 'nombreDocumento'])->where('is_active', true);
+        if ($this->mandanteId) {
+            $reglasQuery->where('mandante_id', $this->mandanteId);
+        }
+        $reglas = $reglasQuery->get()->map(function ($regla) {
+            return ($regla->mandante->razon_social ?? 'SIN MANDANTE') . ' — ' . ($regla->nombreDocumento->nombre ?? 'SIN NOMBRE');
+        })->sort()->values()->toArray();
+
+        // Resultados posibles (del sistema viejo)
+        $resultados = ['Aprobado', 'Rechazado'];
+
+        $maxRows = max(
+            count($mandantes), count($contratistas), count($uos),
+            count($tiposEntidad), count($reglas), count($resultados)
+        );
+
+        $data = [];
+        for ($i = 0; $i < $maxRows; $i++) {
+            $data[] = [
+                $mandantes[$i]    ?? null,
+                $contratistas[$i] ?? null,
+                $uos[$i]          ?? null,
+                $tiposEntidad[$i] ?? null,
+                $reglas[$i]       ?? null,
+                $resultados[$i]   ?? null,
+            ];
+        }
+
+        return collect($data);
+    }
+
+    public function headings(): array
+    {
+        return ['Mandantes', 'Contratistas', 'UOs', 'Tipos Entidad', 'Reglas Documentales', 'Resultados Origen'];
+    }
+
+    public function title(): string
+    {
+        return 'Listados';
+    }
+
+    public function registerEvents(): array
+    {
+        return [
+            AfterSheet::class => function (AfterSheet $event) {
+                $event->sheet->getDelegate()->setSheetState(Worksheet::SHEETSTATE_HIDDEN);
+            },
+        ];
+    }
+}

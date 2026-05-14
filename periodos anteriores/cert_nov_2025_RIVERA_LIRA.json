@@ -1,0 +1,100 @@
+{
+  "periodo": {
+    "mes": 11,
+    "anio": 2025,
+    "folio": "11924962-315477"
+  },
+  "contratista": {
+    "rut": "10.703.728-4",
+    "razon_social": "ANA PAMELA RIVERA LIRA",
+    "direccion": null,
+    "tipo_solicitud": "SUBCONTRATISTA",
+    "email": "MARCIALTORRESBRICENO@GMAIL.COM",
+    "telefono": null,
+    "rep_legal_nombre": null,
+    "rep_legal_rut": null
+  },
+  "empresa_principal": {
+    "rut": "92.387.000-8",
+    "razon_social": "PESQUERA LANDES S.A."
+  },
+  "sistema": {
+    "unidad_organizacional": "LANDES U.O.",
+    "lugar_trabajo": "LANDES LUGAR",
+    "numero_contrato": ""
+  },
+  "resumen": {
+    "contratados_periodo": 0,
+    "desvinculados_periodo": 0,
+    "total_vigentes": 6,
+    "trabajadores_revisados": 6,
+    "remuneraciones_pagadas": 2475487,
+    "cotizaciones_pagadas": 440398,
+    "aviso_previo_trabajadores": 0,
+    "aviso_previo_total": 0,
+    "anio_servicio_trabajadores": 0,
+    "anio_servicio_total": 0,
+    "feriado_trabajadores": 1,
+    "feriado_total": 1044102
+  },
+  "contingencias": [
+    {
+      "clasificacion": "Feriado",
+      "causal": "Empleador informa que se encuentra finiquitado en nómina de trabajadores, no se presenta finiquito firmado y/o ratificado, infringe Ley 20.684. Adeuda feriado proporcional.",
+      "trabajadores_afectados": [
+        {
+          "rut": "15.807.850-3",
+          "nombre": "JONY TARDÓN SEPULVEDA",
+          "codigo": 557201,
+          "monto_contingencia": 1044102,
+          "solucionado": {
+            "fue_solucionado": true,
+            "monto_solucionado": 1044102,
+            "estado": "TOTAL",
+            "fecha_solucion": "2026-01-20"
+          }
+        }
+      ]
+    }
+  ],
+  "nomina_trabajadores": [
+    {
+      "rut": "10.222.897-9",
+      "nombre": "MUNDACA REBOLLEDO PEDRO ANTONIO",
+      "fecha_contrato": "2018-06-01",
+      "fecha_fin_contrato": null
+    },
+    {
+      "rut": "10.570.654-5",
+      "nombre": "SALINAS NUÑEZ BERNARDO ANTONIO",
+      "fecha_contrato": "2018-06-01",
+      "fecha_fin_contrato": null
+    },
+    {
+      "rut": "15.807.850-3",
+      "nombre": "TARDÓN SEPULVEDA JONY ALEXIS",
+      "fecha_contrato": "2025-12-01",
+      "fecha_fin_contrato": null
+    },
+    {
+      "rut": "16.897.268-7",
+      "nombre": "TORRES AREVALO FABIAN",
+      "fecha_contrato": "2024-09-02",
+      "fecha_fin_contrato": null
+    },
+    {
+      "rut": "21.915.704-5",
+      "nombre": "TORRES AREVALO MARCIAL",
+      "fecha_contrato": "2024-09-02",
+      "fecha_fin_contrato": null
+    },
+    {
+      "rut": "10.788.715-6",
+      "nombre": "TORRES BRICEÑO MARCIAL",
+      "fecha_contrato": "2018-06-01",
+      "fecha_fin_contrato": null
+    }
+  ],
+  "fecha_emision_certificado": "2026-01-02",
+  "observaciones_auditor": "Certificado pisado. Contingencia de feriado proporcional del trabajador Tardón Sepulveda solucionada totalmente con presentación de finiquito (fecha solución 20/01/2026)."
+}
