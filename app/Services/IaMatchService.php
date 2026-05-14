@@ -62,76 +62,95 @@ class IaMatchService
 
         foreach ($campos as $campo) {
             $clave     = $campo->campo_clave;
-            $extraido  = $datosExtraidos[$clave] ?? null;
 
-            // Determinar el valor esperado según el tipo de campo
             if ($campo->esCriterio()) {
-                if (!empty($campo->valor_esperado)) {
-                    // Criterio con lista de valores (ej: "Clase B, Clase A1")
-                    $esperado = $campo->valor_esperado;
-                    $tipoComparacion = 'criterio_lista';
+                // Nuevo Paradigma: La IA actúa como auditora booleana ("SI" o "NO") pero también extrae la evidencia
+                $esperado = 'SI';
+                $tipoComparacion = 'boolean_ia';
+                
+                $extraidoTexto = $datosExtraidos[$clave . '_extraido'] ?? null;
+                $extraidoCumple = $datosExtraidos[$clave . '_cumple'] ?? null;
+
+                $item = [
+                    'campo'    => $campo->etiqueta,
+                    'clave'    => $clave,
+                    'extraido' => $extraidoTexto, // La evidencia textual (RUT, Nombres, etc)
+                    'cumple_ia'=> $extraidoCumple, // SÍ o NO
+                    'esperado' => $esperado,
+                    'ok'       => false,
+                    'mensaje'  => '',
+                ];
+
+                if (is_null($extraidoCumple) || $extraidoCumple === '') {
+                    $item['ok'] = !$campo->es_requerido;
+                    $item['mensaje'] = $campo->es_requerido ? 'Evaluación SI/NO no encontrada' : 'Campo no evaluado';
+                    if ($campo->es_requerido) $hayFallo = true;
                 } else {
-                    // Criterio abierto (ej: "Corresponde al titular"). Usamos la identidad completa.
-                    $esperado = $datosEntidad['entidad_identificacion'] ?? null;
-                    $tipoComparacion = 'identidad_fuzzy';
+                    $item['ok'] = $this->comparar($tipoComparacion, $extraidoCumple, $esperado, $datosEntidad);
+                    if (!$item['ok']) {
+                        $item['mensaje'] = "La IA evaluó el criterio como NO CUMPLE.";
+                        if ($campo->es_requerido) $hayFallo = true;
+                    } else {
+                        $item['mensaje'] = "Coincide";
+                    }
                 }
+                $detalle[] = $item;
+                continue;
             } else {
                 // Campo estándar (fecha, periodo, rut)
                 $esperado = $datosEntidad[$clave] ?? null;
                 $tipoComparacion = $campo->tipo_dato;
-            }
+                $extraido = $datosExtraidos[$clave] ?? null;
 
-            $item = [
-                'campo'    => $campo->etiqueta,
-                'clave'    => $clave,
-                'extraido' => $extraido,
-                'esperado' => $esperado,
-                'ok'       => false,
-                'mensaje'  => '',
-            ];
+                $item = [
+                    'campo'    => $campo->etiqueta,
+                    'clave'    => $clave,
+                    'extraido' => $extraido,
+                    'esperado' => $esperado,
+                    'ok'       => false,
+                    'mensaje'  => '',
+                ];
 
-            // Si el campo no fue extraído
-            if (is_null($extraido) || $extraido === '') {
-                $item['ok']      = !$campo->es_requerido; // ok solo si no es requerido
-                $item['mensaje'] = $campo->es_requerido
-                    ? 'Campo requerido no encontrado en el documento'
-                    : 'Campo no encontrado (no requerido)';
-                if ($campo->es_requerido) {
+                if (is_null($extraido) || $extraido === '') {
+                    $item['ok']      = !$campo->es_requerido; // ok solo si no es requerido
+                    $item['mensaje'] = $campo->es_requerido ? 'Campo requerido no encontrado' : 'Campo no encontrado (no requerido)';
+                    if ($campo->es_requerido) {
+                        $hayFallo = true;
+                    }
+                    $detalle[] = $item;
+                    continue;
+                }
+
+                // Si no hay valor esperado en la DB para comparar
+                if (is_null($esperado) || $esperado === '') {
+                    $item['ok']      = true; // Damos por bueno, no podemos comparar
+                    $item['mensaje'] = 'Sin referencia en BD para comparar. Aceptado.';
+                    $hayRevision     = true;
+                    $detalle[]       = $item;
+                    continue;
+                }
+
+                // Las fechas y el periodo son campos informativos que sobrescribirán la BD.
+                // Si fueron extraídos, no penalizan el match, incluso si son diferentes a lo ingresado por el contratista.
+                if (in_array($clave, ['fecha_emision', 'fecha_vencimiento', 'periodo'])) {
+                    $item['ok']      = true;
+                    $item['mensaje'] = 'Se actualizará en BD al confirmar';
+                    $detalle[]       = $item;
+                    continue;
+                }
+
+                // Comparar según el tipo
+                $ok = $this->comparar($tipoComparacion, $extraido, $esperado, $datosEntidad);
+
+                $item['ok']      = $ok;
+                $item['mensaje'] = $ok ? 'Coincide' : 'No coincide';
+
+                if (!$ok && $campo->es_requerido) {
                     $hayFallo = true;
                 }
+
                 $detalle[] = $item;
-                continue;
             }
-
-            // Si no hay valor esperado en la DB para comparar
-            if (is_null($esperado) || $esperado === '') {
-                $item['ok']      = true; // Damos por bueno, no podemos comparar
-                $item['mensaje'] = 'Sin referencia en BD para comparar. Aceptado.';
-                $hayRevision     = true;
-                $detalle[]       = $item;
-                continue;
-            }
-
-            // Las fechas y el periodo son campos informativos que sobrescribirán la BD.
-            // Si fueron extraídos, no penalizan el match, incluso si son diferentes a lo ingresado por el contratista.
-            if (in_array($clave, ['fecha_emision', 'fecha_vencimiento', 'periodo'])) {
-                $item['ok']      = true;
-                $item['mensaje'] = 'Se actualizará en BD al confirmar';
-                $detalle[]       = $item;
-                continue;
-            }
-
-            // Comparar según el tipo
-            $ok = $this->comparar($tipoComparacion, $extraido, $esperado, $datosEntidad);
-
-            $item['ok']      = $ok;
-            $item['mensaje'] = $ok ? 'Coincide' : 'No coincide';
-
-            if (!$ok && $campo->es_requerido) {
-                $hayFallo = true;
-            }
-
-            $detalle[] = $item;
         }
 
         // Determinar resultado global
@@ -328,6 +347,19 @@ class IaMatchService
 
     private function comparar(string $tipoDato, mixed $extraido, mixed $esperado, array $datosEntidad = []): bool
     {
+        if ($tipoDato === 'boolean_ia') {
+            // El usuario extrajo un SI o NO.
+            // Para ser aprobado, debe contener alguna afirmación.
+            $ext = strtolower(trim((string)$extraido));
+            return str_contains($ext, 'si') || 
+                   str_contains($ext, 'sí') || 
+                   str_contains($ext, 'yes') || 
+                   str_contains($ext, 'ok') ||
+                   str_contains($ext, 'cumple') ||
+                   str_contains($ext, 'aprobado') ||
+                   str_contains($ext, 'verdadero') ||
+                   str_contains($ext, 'true');
+        }
         if ($tipoDato === 'criterio_lista') {
             // $esperado es "Valor 1, Valor 2". Extraido debe contener al menos uno.
             $valores = array_map('trim', explode(',', (string)$esperado));

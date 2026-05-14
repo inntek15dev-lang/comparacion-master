@@ -189,7 +189,8 @@
                     @php 
                         $criterioId = (string)$rc->criterio_evaluacion_id; 
                         $isActive = in_array($criterioId, $configCriteriosActivos);
-                        $valoresEsperados = $rc->subCriterios->where('is_active', true)->pluck('nombre')->filter()->implode(', ');
+                        $pautaCustom = $configCriteriosValoresEsperados[$criterioId] ?? null;
+                        $valoresEsperados = $pautaCustom ?: $rc->subCriterios->where('is_active', true)->pluck('nombre')->filter()->implode(', ');
                     @endphp
                     <div class="flex items-start gap-4 p-4 rounded-lg border
                         {{ $isActive ? 'bg-purple-50 border-purple-200' : 'bg-gray-50 border-gray-200' }}">
@@ -213,9 +214,8 @@
                             <p class="text-xs text-gray-500"><span class="font-medium text-gray-700">Aclaración original:</span> {{ $rc->aclaracionCriterio->titulo }}</p>
                             @endif
                             
-                            <p class="text-xs {{ $valoresEsperados ? 'text-gray-600' : 'text-orange-500' }}">
-                                <span class="font-medium text-gray-700">Valores esperados (Match):</span> 
-                                {{ $valoresEsperados ?: 'Ninguno (No podrá hacer match)' }}
+                            <p class="text-xs text-green-600 font-medium">
+                                Pauta oficial del sistema: La IA debe responder "SÍ".
                             </p>
 
                             @if($isActive)
@@ -223,7 +223,7 @@
                                 <label class="block text-xs font-medium text-gray-700 mb-1">
                                     Instrucción para la IA (Texto a extraer)
                                 </label>
-                                <textarea wire:model="configCriteriosDescripciones.{{ $criterioId }}"
+                                <textarea wire:model.live.debounce.500ms="configCriteriosDescripciones.{{ $criterioId }}"
                                           rows="2"
                                           placeholder="Ej: Extraer el cargo indicado en el documento"
                                           class="w-full text-sm border-gray-300 rounded-md focus:ring-purple-500 focus:border-purple-500 mb-2"></textarea>
@@ -361,12 +361,21 @@
                         
                         @php
                             $vinc = $doc->trabajadorVinculacion;
-                            if (!$vinc && $doc->entidad_type === 'App\\Models\\Trabajador' && $doc->entidad) {
+                            $esTrabajador = $doc->entidad_type === 'App\\Models\\Trabajador' && $doc->entidad;
+                            if (!$vinc && $esTrabajador) {
                                 $vinc = $doc->entidad->vinculaciones()->where('is_active', true)->first();
                             }
                         @endphp
                         @if($vinc && $vinc->cargoMandante)
                             <div class="text-xs text-gray-500 truncate max-w-xs mt-0.5"><span class="font-medium">Cargo:</span> {{ $vinc->cargoMandante->nombre_cargo ?? '—' }}</div>
+                        @endif
+                        @if($esTrabajador)
+                            @if($doc->entidad->nacionalidad)
+                                <div class="text-xs text-gray-500 truncate max-w-xs"><span class="font-medium">Nac:</span> {{ $doc->entidad->nacionalidad->nombre }}</div>
+                            @endif
+                            @if($doc->entidad->tipoPermanencia)
+                                <div class="text-xs text-gray-500 truncate max-w-xs"><span class="font-medium">Permanencia:</span> {{ $doc->entidad->tipoPermanencia->nombre }}</div>
+                            @endif
                         @endif
                     </td>
 
@@ -383,47 +392,65 @@
                             @if($datoIa->detalle_match)
                                 <div class="space-y-1 text-xs">
                                     <div class="flex items-center text-[10px] text-gray-400 uppercase font-semibold mb-1 border-b pb-1">
-                                        <div class="w-1/3">Campo</div>
-                                        <div class="w-1/3 text-center">Extraído</div>
-                                        <div class="w-1/3 text-right">BD</div>
+                                        <div class="w-3/12">Campo</div>
+                                        <div class="w-3/12 text-center">Extraído</div>
+                                        <div class="w-3/12 text-center">BD</div>
+                                        <div class="w-3/12 text-right text-indigo-500">Cumple IA</div>
                                     </div>
                                     @foreach($datoIa->detalle_match as $item)
                                         @php
                                             $nombreClave = $item['campo'];
-                                            if (str_starts_with($nombreClave, 'criterio_')) {
-                                                $critId = str_replace('criterio_', '', $nombreClave);
+                                            $esCriterio = str_starts_with($item['clave'], 'criterio_');
+                                            if ($esCriterio) {
+                                                $critId = str_replace('criterio_', '', $item['clave']);
                                                 $crit = \App\Models\CriterioEvaluacion::find($critId);
                                                 if ($crit) $nombreClave = $crit->nombre_criterio;
+                                                $cumpleIa = $item['cumple_ia'] ?? '—';
+                                            } else {
+                                                $cumpleIa = '—';
                                             }
                                         @endphp
                                         <div class="flex items-center justify-between p-1.5 mb-1 {{ $item['ok'] ? 'bg-green-50/70 text-green-800' : 'bg-red-50/70 text-red-800' }} rounded border {{ $item['ok'] ? 'border-green-100' : 'border-red-100' }}">
-                                            <span class="font-medium w-1/3 pr-2 break-words" title="{{ $nombreClave }}">{{ $item['ok'] ? '✅' : '❌' }} {{ $nombreClave }}</span>
-                                            <span class="font-mono w-1/3 text-center font-bold break-words whitespace-pre-wrap" title="{{ $item['extraido'] }}">{{ $item['extraido'] ?? '—' }}</span>
-                                            <span class="w-1/3 text-right opacity-80 break-words whitespace-pre-wrap" title="{{ $item['esperado'] }}">{{ $item['esperado'] ?? '—' }}</span>
+                                            <span class="font-medium w-3/12 pr-1 break-words leading-tight" title="{{ $nombreClave }}">{{ $item['ok'] ? '✅' : '❌' }} {{ $nombreClave }}</span>
+                                            <span class="font-mono w-3/12 text-center break-words whitespace-pre-wrap">{{ $item['extraido'] ?? '—' }}</span>
+                                            <span class="w-3/12 text-center opacity-80 break-words whitespace-pre-wrap">{{ $esCriterio ? '—' : ($item['esperado'] ?? '—') }}</span>
+                                            <span class="w-3/12 text-right font-bold text-indigo-700 uppercase">{{ $cumpleIa }}</span>
                                         </div>
                                     @endforeach
                                 </div>
                             @elseif($datoIa->datos_extraidos)
                                 <div class="space-y-1 text-xs text-gray-600">
                                     <div class="flex items-center text-[10px] text-gray-400 uppercase font-semibold mb-1 border-b pb-1">
-                                        <div class="w-1/2">Campo</div>
-                                        <div class="w-1/2 text-right">Extraído</div>
+                                        <div class="w-4/12">Campo</div>
+                                        <div class="w-4/12 text-center">Extraído</div>
+                                        <div class="w-4/12 text-right text-indigo-500">Cumple IA</div>
                                     </div>
                                     @foreach($datoIa->datos_extraidos as $clave => $valor)
                                         @php
-                                            $nombreClave = $clave;
-                                            if (str_starts_with($nombreClave, 'criterio_')) {
+                                            if (str_ends_with($clave, '_cumple')) continue; // Lo mostramos junto al _extraido
+                                            $nombreClave = str_replace('_extraido', '', $clave);
+                                            $esCriterio = str_ends_with($clave, '_extraido');
+                                            
+                                            if ($esCriterio) {
                                                 $critId = str_replace('criterio_', '', $nombreClave);
                                                 $crit = \App\Models\CriterioEvaluacion::find($critId);
                                                 if ($crit) $nombreClave = $crit->nombre_criterio;
+                                                // clave is 'criterio_25_extraido', nombreClave is 'criterio_25' (before we rename it)
+                                                $claveBase = str_replace('_extraido', '', $clave);
+                                                $cumpleIa = $datoIa->datos_extraidos[$claveBase . '_cumple'] ?? '—';
+                                            } else {
+                                                $cumpleIa = '—';
                                             }
+                                            
+                                            $valorDisplay = is_array($valor) ? json_encode($valor) : ($valor ?? '—');
                                         @endphp
-                                        <div class="flex justify-between border-b border-gray-400 last:border-0 py-1.5">
-                                            <span class="font-medium text-gray-800 w-1/2 pr-2 break-words" title="{{ $nombreClave }}">{{ $nombreClave }}:</span>
-                                            <span class="text-indigo-600 font-mono w-1/2 text-right font-bold break-words whitespace-pre-wrap" title="{{ is_array($valor) ? json_encode($valor) : $valor }}">{{ is_array($valor) ? json_encode($valor) : ($valor ?? '—') }}</span>
+                                        <div class="flex justify-between border-b border-gray-400 last:border-0 py-1.5 items-center">
+                                            <span class="font-medium text-gray-800 w-4/12 pr-2 break-words leading-tight" title="{{ $nombreClave }}">{{ $nombreClave }}:</span>
+                                            <span class="font-mono w-4/12 text-center break-words whitespace-pre-wrap" title="{{ $valorDisplay }}">{{ $valorDisplay === 'no' || $valorDisplay === 'si' ? '—' : $valorDisplay }}</span>
+                                            <span class="text-indigo-700 font-bold w-4/12 text-right uppercase">{{ $cumpleIa }}</span>
                                         </div>
                                     @endforeach
-                                    <div class="text-[10px] text-gray-400 italic mt-1 text-right">Pendiente de calcular match...</div>
+                                    <div class="text-[10px] text-gray-400 italic mt-1 text-right">Pendiente de Aceptar Análisis IA...</div>
                                 </div>
                             @endif
                         @else
@@ -504,7 +531,7 @@
                             <button wire:click="calcularMatch({{ $doc->id }})"
                                     wire:loading.attr="disabled"
                                     class="px-3 py-1 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 transition disabled:opacity-50 w-full max-w-[120px]">
-                                <span wire:loading.remove wire:target="calcularMatch({{ $doc->id }})">🧮 Match</span>
+                                <span wire:loading.remove wire:target="calcularMatch({{ $doc->id }})">🤖 Aceptar Análisis IA</span>
                                 <span wire:loading wire:target="calcularMatch({{ $doc->id }})">⏳ Calc...</span>
                             </button>
                             @endif

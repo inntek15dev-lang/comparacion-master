@@ -56,7 +56,7 @@ class IaExtraccionService
         $pdfBase64  = base64_encode($pdfContent);
 
         // 4. Construir el prompt
-        $prompt = $this->construirPrompt($campos);
+        $prompt = $this->construirPrompt($campos, $documento);
 
         // 4.5. Extraer formatos de muestra base64 (si hay)
         $formatosBase64 = [];
@@ -86,7 +86,7 @@ class IaExtraccionService
         // 7. Guardar o actualizar datos_extraidos_ia
         $datoIa = $this->guardarDatoIa($documento, $respuestaRaw, $datosExtraidos);
 
-        // 8. Omitimos cálculo de match automático a petición del admin. El match será disparado manualmente.
+        // 8. Omitimos cálculo de match automático a petición del admin. El match será disparado manualmente con el botón "Aceptar IA".
         // $this->matchService->calcularMatch($datoIa);
 
         return $datoIa;
@@ -109,7 +109,7 @@ class IaExtraccionService
         return Storage::disk('public')->get($documento->ruta_archivo);
     }
 
-    private function construirPrompt(\Illuminate\Support\Collection $campos): string
+    private function construirPrompt(\Illuminate\Support\Collection $campos, DocumentoCargado $documento): string
     {
         $listaCampos = $campos->map(function ($campo) {
             $def  = \App\Services\IaCamposDisponibles::definicion($campo->campo_clave);
@@ -119,10 +119,59 @@ class IaExtraccionService
             
             $formatoNota = $campo->formato_muestra_id ? " (Evalúa esto comparándolo con las imágenes de 'Formato de Muestra' adjuntas)" : "";
             
+            if ($campo->esCriterio()) {
+                return "- {$campo->campo_clave}_extraido: Extrae textualmente los datos del documento que el humano te pidió buscar en esta instrucción: {$hint}\n" .
+                       "- {$campo->campo_clave}_cumple: Actúa como auditor estricto. Revisa si el documento cumple con la regla '{$etiqueta}'. Responde ÚNICA Y EXCLUSIVAMENTE con 'SI' o 'NO'.{$formatoNota}";
+            }
+            
             return "- {$campo->campo_clave} (tipo: {$tipo}): {$etiqueta} — {$hint}{$formatoNota}";
         })->implode("\n");
 
-        $formatoEsperado = $campos->mapWithKeys(fn($c) => [$c->campo_clave => null])->toJson();
+        $formatoEsperadoArray = [];
+        foreach ($campos as $c) {
+            if ($c->esCriterio()) {
+                $formatoEsperadoArray[$c->campo_clave . '_extraido'] = "texto extraido";
+                $formatoEsperadoArray[$c->campo_clave . '_cumple'] = "SI o NO";
+            } else {
+                $formatoEsperadoArray[$c->campo_clave] = "valor";
+            }
+        }
+        $formatoEsperado = json_encode($formatoEsperadoArray, JSON_PRETTY_PRINT);
+
+        $entidad = $documento->entidad;
+        $contextoEntidad = '';
+        if ($entidad) {
+            $contextoEntidad .= "DATOS DE REFERENCIA DEL SISTEMA (Usa esta información para validar si el documento corresponde a la persona/empresa/vehículo):\n";
+            if ($documento->entidad_type === 'App\Models\Trabajador') {
+                $contextoEntidad .= "- TIPO DE ENTIDAD: Trabajador\n";
+                $contextoEntidad .= "- NOMBRE COMPLETO: " . trim(($entidad->nombres ?? '') . ' ' . ($entidad->apellidos ?? '')) . "\n";
+                $contextoEntidad .= "- RUT/IDENTIFICADOR: " . ($entidad->rut ?? '') . "\n";
+                if ($entidad->nacionalidad) {
+                    $contextoEntidad .= "- NACIONALIDAD: " . ($entidad->nacionalidad->nombre ?? '') . "\n";
+                }
+                if ($entidad->tipoPermanencia) {
+                    $contextoEntidad .= "- TIPO DE PERMANENCIA: " . ($entidad->tipoPermanencia->nombre ?? '') . "\n";
+                }
+                
+                $vinc = $documento->trabajadorVinculacion;
+                if (!$vinc) {
+                    $vinc = $entidad->vinculaciones()->where('is_active', true)->first();
+                }
+                if ($vinc && $vinc->cargoMandante) {
+                    $contextoEntidad .= "- CARGO: " . ($vinc->cargoMandante->nombre_cargo ?? '') . "\n";
+                }
+            } elseif ($documento->entidad_type === 'App\Models\Vehiculo') {
+                $contextoEntidad .= "- TIPO DE ENTIDAD: Vehículo\n";
+                $contextoEntidad .= "- PATENTE: " . trim(($entidad->patente_letras ?? '') . ($entidad->patente_numeros ?? '')) . "\n";
+                $contextoEntidad .= "- MARCA: " . ($entidad->marca ?? '') . "\n";
+                $contextoEntidad .= "- MODELO: " . ($entidad->modelo ?? '') . "\n";
+            } elseif ($documento->entidad_type === 'App\Models\Empresa' || $documento->entidad_type === 'App\Models\Contratista') {
+                $contextoEntidad .= "- TIPO DE ENTIDAD: Empresa / Contratista\n";
+                $contextoEntidad .= "- RAZON SOCIAL: " . ($entidad->razon_social ?? '') . "\n";
+                $contextoEntidad .= "- RUT/IDENTIFICADOR: " . ($entidad->rut ?? '') . "\n";
+            }
+            $contextoEntidad .= "\n";
+        }
 
         return <<<PROMPT
 Eres un asistente especializado en extracción de datos de documentos laborales y empresariales.
@@ -130,7 +179,7 @@ Analiza el documento PDF (la primera imagen/archivo adjunto). Si hay más imáge
 Extrae EXACTAMENTE los campos solicitados basándote en la información del documento principal.
 Responde ÚNICAMENTE con un objeto JSON válido, sin texto adicional, sin markdown, sin explicaciones.
 
-CAMPOS A EXTRAER:
+{$contextoEntidad}CAMPOS A EXTRAER:
 {$listaCampos}
 
 REGLAS IMPORTANTES:
@@ -139,7 +188,7 @@ REGLAS IMPORTANTES:
 - Para campos tipo "fecha": usa formato YYYY-MM-DD.
 - Para campos tipo "texto" con formato YYYY-MM: extrae el período mensual.
 - Para campos tipo "numero": solo números.
-- Si un campo te pide validar "corresponde al formato", compara el diseño y estructura del documento con las imágenes de Formato de Muestra. Devuelve "SI" o "NO" (o el valor esperado dictado en la instrucción).
+- PROHIBIDO EXTRAER DATOS (rut, nombres, fechas) DE LOS FORMATOS DE MUESTRA. Los formatos de muestra son solo referencias visuales, no son el documento del trabajador. Todo dato real debe salir del primer documento adjunto.
 
 FORMATO DE RESPUESTA (JSON exacto, sin nada más):
 {$formatoEsperado}
@@ -226,8 +275,17 @@ PROMPT;
             return [];
         }
 
-        // Asegurar que solo vengan las claves configuradas
-        $clavesPermitidas = $campos->pluck('campo_clave')->toArray();
+        // Asegurar que solo vengan las claves configuradas (y sus sufijos si son criterios)
+        $clavesPermitidas = [];
+        foreach ($campos as $c) {
+            if ($c->esCriterio()) {
+                $clavesPermitidas[] = $c->campo_clave . '_extraido';
+                $clavesPermitidas[] = $c->campo_clave . '_cumple';
+            } else {
+                $clavesPermitidas[] = $c->campo_clave;
+            }
+        }
+        
         return array_intersect_key($datos, array_flip($clavesPermitidas));
     }
 

@@ -226,8 +226,9 @@ class RevisionIaAcreditacion extends Component
         $this->configCriteriosDescripciones = [];
         $this->configCriteriosFormatos   = [];
         foreach ($criterios as $c) {
-            $this->configCriteriosDescripciones[$c->criterio_evaluacion_id] = $c->descripcion_ia;
-            $this->configCriteriosFormatos[$c->criterio_evaluacion_id] = $c->formato_muestra_id;
+            $key = (string) $c->criterio_evaluacion_id;
+            $this->configCriteriosDescripciones[$key] = $c->descripcion_ia ?? '';
+            $this->configCriteriosFormatos[$key] = $c->formato_muestra_id ?? '';
         }
     }
 
@@ -244,81 +245,86 @@ class RevisionIaAcreditacion extends Component
 
         $clavesValidas = \App\Services\IaCamposDisponibles::claves();
 
-        // Eliminar configuración anterior para esta regla
-        IaCampoConfiguracion::where('regla_documental_id', $this->configReglaId)->delete();
+        try {
+            $totalGuardados = \Illuminate\Support\Facades\DB::transaction(function () use ($clavesValidas) {
+                // Eliminar configuración anterior para esta regla
+                IaCampoConfiguracion::where('regla_documental_id', $this->configReglaId)->delete();
 
-        $totalGuardados = 0;
+                $totalGuardados = 0;
 
-        // ── 1. Campos de documentos_cargados ────────────────────────────────
-        foreach ($this->configCamposActivos as $clave) {
-            if (!in_array($clave, $clavesValidas)) continue;
+                // ── 1. Campos de documentos_cargados ────────────────────────────────
+                foreach ($this->configCamposActivos as $clave) {
+                    if (!in_array($clave, $clavesValidas)) continue;
 
-            $def = \App\Services\IaCamposDisponibles::definicion($clave);
+                    $def = \App\Services\IaCamposDisponibles::definicion($clave);
 
-            IaCampoConfiguracion::create([
-                'regla_documental_id'  => $this->configReglaId,
-                'campo_clave'          => $clave,
-                'etiqueta'             => $def['etiqueta'],
-                'tipo_dato'            => $def['tipo_dato'],
-                'es_requerido'         => in_array($clave, $this->configRequeridos),
-                'mapea_a_columna'      => $def['mapea_columna'],
-                'descripcion_ia'       => $def['descripcion'],
-                'valor_esperado'       => null,
-                'criterio_evaluacion_id' => null,
-                'orden'                => array_search($clave, $clavesValidas),
-                'is_active'            => true,
-            ]);
-            $totalGuardados++;
+                    IaCampoConfiguracion::create([
+                        'regla_documental_id'  => $this->configReglaId,
+                        'campo_clave'          => $clave,
+                        'etiqueta'             => $def['etiqueta'],
+                        'tipo_dato'            => $def['tipo_dato'],
+                        'es_requerido'         => in_array($clave, $this->configRequeridos),
+                        'mapea_a_columna'      => $def['mapea_columna'],
+                        'descripcion_ia'       => $def['descripcion'],
+                        'valor_esperado'       => null,
+                        'criterio_evaluacion_id' => null,
+                        'orden'                => array_search($clave, $clavesValidas),
+                        'is_active'            => true,
+                    ]);
+                    $totalGuardados++;
+                }
+
+                // ── 2. Criterios de la regla ─────────────────────────────────────────
+                foreach ($this->configCriteriosActivos as $criterioIdStr) {
+                    $criterioId = (int) $criterioIdStr;
+
+                    // Cargar el criterio con sus relaciones
+                    $rdCriterio = \App\Models\ReglaDocumentalCriterio::with([
+                        'criterioEvaluacion',
+                        'subCriterios',
+                        'aclaracionCriterio',
+                    ])->where('regla_documental_id', $this->configReglaId)
+                      ->where('criterio_evaluacion_id', $criterioId)
+                      ->first();
+
+                    if (!$rdCriterio || !$rdCriterio->criterioEvaluacion) continue;
+
+                    $criterio   = $rdCriterio->criterioEvaluacion;
+                    $aclaracion = $rdCriterio->aclaracionCriterio;
+
+                    // El nuevo paradigma booleano dicta que el valor esperado de un Criterio es siempre "SI".
+                    $valoresEsperados = 'SI';
+
+                    // Hint para el prompt: texto manual (Asem Admin) o un default sugerido
+                    $hintPrompt = $this->configCriteriosDescripciones[$criterioIdStr] ?? 
+                                  ($aclaracion?->titulo ? "{$criterio->nombre_criterio}. Aclaración: {$aclaracion->titulo}" : $criterio->nombre_criterio);
+
+                    IaCampoConfiguracion::create([
+                        'regla_documental_id'    => $this->configReglaId,
+                        'campo_clave'            => 'criterio_' . $criterioId,
+                        'etiqueta'               => $criterio->nombre_criterio,
+                        'tipo_dato'              => 'texto',
+                        'es_requerido'           => in_array($criterioIdStr, $this->configCriteriosRequeridos),
+                        'mapea_a_columna'        => null, // Los criterios NO escriben en documentos_cargados
+                        'descripcion_ia'         => $hintPrompt,
+                        'valor_esperado'         => $valoresEsperados ?: null,
+                        'criterio_evaluacion_id' => $criterioId,
+                        'formato_muestra_id'     => empty($this->configCriteriosFormatos[$criterioIdStr]) ? null : $this->configCriteriosFormatos[$criterioIdStr],
+                        'orden'                  => 100 + $criterioId,
+                        'is_active'              => true,
+                    ]);
+                    $totalGuardados++;
+                }
+
+                return $totalGuardados;
+            });
+
+            $this->configMensaje  = "✓ Configuración guardada: {$totalGuardados} campos (columnas + criterios).";
+            $this->configGuardado = true;
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('Error guardando configuración IA: ' . $e->getMessage());
+            $this->configMensajeError = 'Ocurrió un error al guardar la configuración: ' . $e->getMessage();
         }
-
-        // ── 2. Criterios de la regla ─────────────────────────────────────────
-        foreach ($this->configCriteriosActivos as $criterioIdStr) {
-            $criterioId = (int) $criterioIdStr;
-
-            // Cargar el criterio con sus relaciones
-            $rdCriterio = \App\Models\ReglaDocumentalCriterio::with([
-                'criterioEvaluacion',
-                'subCriterios',
-                'aclaracionCriterio',
-            ])->where('regla_documental_id', $this->configReglaId)
-              ->where('criterio_evaluacion_id', $criterioId)
-              ->first();
-
-            if (!$rdCriterio || !$rdCriterio->criterioEvaluacion) continue;
-
-            $criterio   = $rdCriterio->criterioEvaluacion;
-            $aclaracion = $rdCriterio->aclaracionCriterio;
-
-            // Construir valor esperado desde los sub_criterios
-            $valoresEsperados = $rdCriterio->subCriterios
-                ->where('is_active', true)
-                ->pluck('nombre')
-                ->filter()
-                ->implode(', ');
-
-            // Hint para el prompt: texto manual (Asem Admin) o un default sugerido
-            $hintPrompt = $this->configCriteriosDescripciones[$criterioIdStr] ?? 
-                          ($aclaracion?->titulo ? "{$criterio->nombre_criterio}. Aclaración: {$aclaracion->titulo}" : $criterio->nombre_criterio);
-
-            IaCampoConfiguracion::create([
-                'regla_documental_id'    => $this->configReglaId,
-                'campo_clave'            => 'criterio_' . $criterioId,
-                'etiqueta'               => $criterio->nombre_criterio,
-                'tipo_dato'              => 'texto',
-                'es_requerido'           => in_array($criterioIdStr, $this->configCriteriosRequeridos),
-                'mapea_a_columna'        => null, // Los criterios NO escriben en documentos_cargados
-                'descripcion_ia'         => $hintPrompt,
-                'valor_esperado'         => $valoresEsperados ?: null,
-                'criterio_evaluacion_id' => $criterioId,
-                'formato_muestra_id'     => $this->configCriteriosFormatos[$criterioIdStr] ?: null,
-                'orden'                  => 100 + $criterioId,
-                'is_active'              => true,
-            ]);
-            $totalGuardados++;
-        }
-
-        $this->configMensaje  = "✓ Configuración guardada: {$totalGuardados} campos (columnas + criterios).";
-        $this->configGuardado = true;
     }
 
     // ─── Acciones individuales ────────────────────────────────────────────────

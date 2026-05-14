@@ -2188,3 +2188,50 @@ $cleanKey = preg_replace('/\s+/', '_', trim($cleanKey));
 
 > 🔒 **Decisión de diseño:** Este módulo es completamente independiente de `ImportarDocumentos`. No se modificó ningún archivo del importador masivo original para garantizar cero regresión en flujos productivos.
 
+---
+
+### Módulo 35: Acreditación IA Multimodal (Visual Grounding) [2026-05-13]
+
+#### Historia de Usuario (El QUÉ)
+"Como **Administrador/Auditor**, necesito que la Inteligencia Artificial no solo extraiga texto de los documentos, sino que tenga la capacidad de comparar visualmente la estructura y diseño del documento subido contra un 'Formato de Muestra' oficial (ej. formato de liquidación, diseño de credencial, etc.), y me responda si cumple o no con ese formato corporativo. Además, quiero poder elegir dinámicamente entre distintos modelos de IA (Gemini, Claude, Llama, Qwen) según las necesidades de rendimiento y costo."
+
+#### Ficha Técnica / Blueprint (El CÓMO)
+
+*   **Arquitectura Base:**
+    *   Integración con la API de **OpenRouter**, permitiendo intercambiar el modelo fundacional en caliente sin tocar el backend.
+    *   Soporte nativo para arreglos de imágenes (Multimodalidad).
+*   **Modelo de Datos (`IaCampoConfiguracion`):**
+    *   Inclusión de `formato_muestra_id` (migración `add_formato_muestra_id_to_ia_campos_configuracion_table`) como llave foránea hacia `formatos_documento_muestra`.
+*   **Controlador UI (`RevisionIaAcreditacion`):**
+    *   Nuevo selector de Modelos IA (Gemini 2.5 Flash, Claude 3 Haiku, Llama 3.2 Vision, Qwen 2.5 VL, etc.).
+    *   Nuevo selector de "Formato de Muestra" en la configuración de cada criterio (Cajón de texto).
+    *   Mejoras UI: Se eliminaron los cortes abruptos (`truncate`) en la "Vista Águila" usando `break-words` y se remarcaron fuertemente los bordes de la tabla (`border-gray-400`) para máxima legibilidad. Las tipografías de Contratista y Entidad fueron aumentadas.
+*   **Servicio Core (`IaExtraccionService`):**
+    *   El método `procesarDocumento` ahora detecta si el criterio tiene un formato asociado, va al disco (`Storage::disk('public')`), convierte la imagen de muestra en Base64, y la adjunta como un nodo secundario de tipo `file` en el payload JSON que se envía a OpenRouter.
+    *   El prompt general incluye una directriz estricta ("Visual Grounding") advirtiendo a la IA que cualquier imagen secundaria adjunta es únicamente un patrón visual de referencia, blindando al modelo contra alucinaciones (evitando que lea los datos del trabajador de la plantilla de muestra).
+*   **Conclusión Técnica:** La familia **Gemini 2.5 Flash** probó ser superior en atención cruzada multimodal en comparación con LLMs Open Source, logrando separar con éxito el contexto del documento a analizar.
+
+---
+
+### Módulo 36: Auditor IA Booleano y Contexto de Entidad [2026-05-13]
+
+#### Historia de Usuario (El QUÉ)
+"Como **Auditor de Terreno**, necesito que la Inteligencia Artificial deje de ser una caja negra. Quiero que la IA evalúe las reglas con un SÍ o NO definitivo, pero que me muestre explícitamente en una columna separada el fragmento de texto exacto que leyó para tomar esa decisión. Además, la IA debe saber exactamente de quién es el documento (Trabajador, Empresa o Vehículo) para que cuando yo le pida 'Compara el RUT', la IA sepa con qué RUT oficial debe cruzar la información sin que yo tenga que escribirlo manualmente en la configuración."
+
+#### Ficha Técnica / Blueprint (El CÓMO)
+
+*   **Arquitectura Dual de Criterios (Evidencia vs Veredicto):**
+    *   Se refactorizó la estructura del JSON esperado en `IaExtraccionService`. Ahora, para todo campo catalogado como "Criterio", el motor genera dos claves dinámicas obligatorias:
+        *   `{campo}_extraido`: Exige a la IA extraer la evidencia textual pura.
+        *   `{campo}_cumple`: Exige a la IA evaluar la evidencia contra la regla de negocio y responder de manera estrictamente booleana (`SI` o `NO`).
+    *   La UI (`revision-ia-acreditacion.blade.php`) fue adaptada para pintar tres columnas semánticas (Campo, Extraído, Cumple IA), filtrando inteligentemente respuestas ambiguas.
+*   **Inyección Dinámica de Contexto de Entidad:**
+    *   Se implementó un bloque de interpolación de variables en `IaExtraccionService::construirPrompt()`.
+    *   Antes de evaluar el documento, el motor inyecta "en secreto" los **Datos de Referencia del Sistema** al prompt de la IA.
+    *   Para **Trabajadores**, inyecta: `Nombres`, `RUT`, `Cargo` (resolviendo la vinculación activa), `Nacionalidad` y `Tipo de Permanencia`.
+    *   Para **Vehículos**, inyecta: `Patente`, `Marca` y `Modelo`.
+    *   Para **Empresas**, inyecta: `Razón Social` y `RUT`.
+*   **Gestión del Flujo Humano-IA:**
+    *   Se eliminó la dependencia matemática antigua (`Identidad Fuzzy`) para criterios, delegando la responsabilidad cognitiva a la IA, pero manteniendo el paso manual ("Aceptar Análisis IA") para garantizar la supervisión humana.
+    *   El ciclo de vida del documento (`reemplaza_a_id` y archivado automático) sigue anclado estrictamente a la **confirmación manual humana**, evitando que una alucinación de la IA archive documentos válidos prematuramente.
+*   **Conclusión de Diseño:** Este patrón resuelve el "Problema de la Caja Negra" inherente a los LLMs, obligando al modelo fundacional a justificar sus evaluaciones lógicas con extracciones explícitas, mientras la inyección de contexto le da a la IA "los ojos del sistema" para realizar verificaciones cruzadas sin configuraciones estáticas engorrosas.
